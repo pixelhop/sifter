@@ -1,6 +1,6 @@
-# Podcast Digest
+# Sifter
 
-AI-powered personalized podcast highlights. Listens to podcasts on your behalf, extracts relevant clips, and stitches them into a polished digest with an AI narrator.
+AI-powered personalized podcast highlights. Sifter listens to podcasts on your behalf, extracts relevant clips using AI, and stitches them into a polished daily digest with an AI narrator.
 
 ## What It Does
 
@@ -21,12 +21,12 @@ AI-powered personalized podcast highlights. Listens to podcasts on your behalf, 
 
 ## Tech Stack
 
-- **Backend**: Nitro (Node.js)
+- **Backend**: Nitro (Node.js) with Vercel AI SDK
 - **Frontend**: Nuxt 4 (Vue)
 - **Database**: PostgreSQL + Prisma
 - **Queue**: BullMQ + Redis
 - **Audio**: FFmpeg, OpenAI Whisper, ElevenLabs TTS
-- **AI**: OpenAI GPT-4 for clip selection
+- **AI**: Vercel AI SDK + OpenRouter (GPT-4, Claude, etc.)
 
 ## Getting Started
 
@@ -51,19 +51,35 @@ pnpm dev
 
 ```bash
 # packages/api/.env
-DATABASE_URL="postgresql://user:pass@localhost:5432/podcast_digest"
+DATABASE_URL="postgresql://user:pass@localhost:5432/sifter"
 REDIS_URL="redis://localhost:6379"
-OPENAI_API_KEY="sk-..."
+OPENROUTER_API_KEY="sk-or-..."
 ELEVENLABS_API_KEY="..."
+WHISPER_API_KEY="..."  # OpenAI API key for Whisper
 
 # packages/app/.env
 NUXT_PUBLIC_API_URL="http://localhost:3001"
 ```
 
+## AI SDK Configuration
+
+We use Vercel AI SDK with OpenRouter for maximum flexibility:
+
+```typescript
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+
+const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
+// Use any model: GPT-4, Claude, Llama, etc.
+const model = openrouter('anthropic/claude-3.5-sonnet');
+```
+
 ## Project Structure
 
 ```
-podcast-digest/
+sifter/
 ├── packages/
 │   ├── api/           # Nitro API server
 │   │   ├── routes/
@@ -74,7 +90,7 @@ podcast-digest/
 │   │   └── utils/
 │   │       ├── audio.ts    # FFmpeg helpers
 │   │       ├── whisper.ts  # Transcription
-│   │       └── elevenlabs.ts # TTS
+│   │       └── ai.ts       # Vercel AI SDK + OpenRouter
 │   │
 │   ├── app/           # Nuxt 4 frontend
 │   │   ├── pages/
@@ -96,7 +112,7 @@ podcast-digest/
 │   └── workers/       # BullMQ background jobs
 │       ├── jobs/
 │       │   ├── transcribe.ts      # Whisper transcription
-│       │   ├── analyze.ts         # GPT-4 clip selection
+│       │   ├── analyze.ts         # AI clip selection
 │       │   └── stitch.ts          # FFmpeg audio mixing
 │       └── queues/
 │           └── index.ts
@@ -111,7 +127,7 @@ podcast-digest/
 - [ ] Podcast search via iTunes API
 - [ ] RSS feed subscription (5-10 podcasts)
 - [ ] Daily/weekly digest generation
-- [ ] AI clip selection with GPT-4
+- [ ] AI clip selection with Vercel AI SDK
 - [ ] AI narrator with ElevenLabs
 - [ ] Audio stitching with FFmpeg
 - [ ] Private podcast feed
@@ -137,7 +153,7 @@ pnpm run prisma:migrate:dev  # Create migration
 ## Deployment
 
 - API: Render/Railway
-- App: Vercel/Netlify
+- App: Vercel
 - Database: Supabase/Neon
 - Redis: Upstash
 - Storage: S3 + CloudFront

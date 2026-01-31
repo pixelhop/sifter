@@ -1,6 +1,6 @@
-# Podcast Digest
+# Sifter
 
-AI-powered personalized podcast highlights. The app listens to podcasts on your behalf, extracts relevant clips using AI, and stitches them into a polished daily/weekly digest with an AI narrator.
+AI-powered personalized podcast highlights. Sifter listens to podcasts on your behalf, extracts relevant clips using AI, and stitches them into a polished daily/weekly digest with an AI narrator.
 
 ## Project Structure
 
@@ -8,18 +8,19 @@ This is a monorepo with four packages:
 
 | Package | Tech | Purpose |
 |---------|------|---------|
-| `packages/api` | Nitro | REST API — auth, podcast management, digest generation, audio processing endpoints |
+| `packages/api` | Nitro | REST API — auth, podcast management, digest generation, audio processing |
 | `packages/app` | Nuxt 4 | Web app — user dashboard, podcast search, digest player |
 | `packages/db` | Prisma | PostgreSQL database — users, podcasts, episodes, clips, digests |
 | `packages/workers` | BullMQ | Background jobs — transcription, AI analysis, audio stitching |
 
 ## Tech Stack
 
-- **API**: Nitro (Node.js) with OpenAI, ElevenLabs, FFmpeg
+- **API**: Nitro (Node.js) with Vercel AI SDK
 - **Frontend**: Nuxt 4 (Vue 3) with Tailwind
 - **Database**: PostgreSQL + Prisma ORM
 - **Queue**: BullMQ with Redis
-- **Audio**: FFmpeg for mixing, Whisper API for transcription, ElevenLabs for TTS
+- **Audio**: FFmpeg for mixing, OpenAI Whisper for transcription, ElevenLabs for TTS
+- **AI**: Vercel AI SDK + OpenRouter (access to GPT-4, Claude, Llama, etc.)
 
 ## Key Concepts
 
@@ -36,7 +37,7 @@ This is a monorepo with four packages:
 
 1. Download episode MP3
 2. Transcribe with Whisper API (word-level timestamps)
-3. GPT-4 analyzes transcript, selects clips with timestamps
+3. AI analyzes transcript (via Vercel AI SDK), selects clips with timestamps
 4. FFmpeg slices clips and adds fade in/out
 5. ElevenLabs generates AI narrator audio
 6. FFmpeg mixes everything together
@@ -45,8 +46,26 @@ This is a monorepo with four packages:
 
 - **iTunes Search API** — podcast discovery (free, no auth)
 - **OpenAI Whisper** — transcription ($0.006/min)
-- **OpenAI GPT-4** — clip selection
+- **OpenRouter** — LLM access via Vercel AI SDK (GPT-4, Claude, etc.)
 - **ElevenLabs** — AI narrator TTS ($5/month for 100K chars)
+
+## AI SDK Configuration
+
+We use Vercel AI SDK with OpenRouter for flexibility:
+
+```typescript
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { generateText } from 'ai';
+
+const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
+const { text } = await generateText({
+  model: openrouter('anthropic/claude-3.5-sonnet'),
+  prompt: 'Select clips from this transcript...',
+});
+```
 
 ## Guidelines
 
@@ -56,6 +75,7 @@ This is a monorepo with four packages:
 - Use Prisma client from `packages/db` in API and workers
 - Queue long-running jobs (transcription, stitching) in workers
 - Store audio files in S3, reference by URL in database
+- Use Vercel AI SDK for all LLM calls (via OpenRouter)
 
 ## Environment Setup
 

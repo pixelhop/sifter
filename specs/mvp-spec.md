@@ -1,9 +1,11 @@
-# AI Podcast Highlights - MVP Specification
+# Sifter - MVP Specification
 
 ## Overview
-Personalized podcast digest generator that listens to podcasts on your behalf, extracts relevant clips using AI, and stitches them into a polished daily/weekly digest with an AI narrator.
+Sifter is an AI-powered personalized podcast digest generator. It listens to podcasts on your behalf, extracts relevant clips using AI, and stitches them into a polished daily/weekly digest with an AI narrator.
 
 **Key Differentiator:** Auto-stitched audio with high-quality AI narration and social sharing capabilities.
+
+**Domain:** sifter.fm (available)
 
 ---
 
@@ -210,10 +212,34 @@ curl https://api.openai.com/v1/audio/transcriptions \
 - `words[]`: Array with `word`, `start`, `end` timestamps
 - `segments[]`: Larger chunks with timestamps
 
-### 3. AI Clip Selection (GPT-4)
-```javascript
-const prompt = `
-You are a podcast editor. Analyze this transcript and extract the most 
+### 3. AI Clip Selection (Vercel AI SDK + OpenRouter)
+
+We use Vercel AI SDK with OpenRouter for flexible model access:
+
+```typescript
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { generateObject } from 'ai';
+import { z } from 'zod';
+
+const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
+// Use Claude 3.5 Sonnet for analysis
+const model = openrouter('anthropic/claude-3.5-sonnet');
+
+const { object: clips } = await generateObject({
+  model,
+  schema: z.object({
+    clips: z.array(z.object({
+      start: z.string(), // MM:SS
+      end: z.string(),
+      summary: z.string(),
+      relevance: z.number().min(0).max(100),
+      reasoning: z.string()
+    }))
+  }),
+  prompt: `You are a podcast editor. Analyze this transcript and extract the most 
 interesting/valuable segments.
 
 User interests: ${user.interests.join(', ')}
@@ -222,19 +248,15 @@ Episode: ${title} by ${author}
 Transcript with timestamps:
 ${transcript}
 
-Select 3-5 clips (30-120 seconds each) that:
-1. Match user interests
-2. Are self-contained (make sense without full context)
-3. Have high information density
-4. Include surprising insights or actionable advice
+Select 3-5 clips (30-120 seconds each) that match user interests and have high value.`
+});
+```
 
-Return JSON:
-{
-  "clips": [
-    {
-      "start": "MM:SS",
-      "end": "MM:SS",
-      "summary": "Brief description",
+**Benefits of this approach:**
+- Switch models easily (GPT-4, Claude, Llama, etc.)
+- Built-in retries, streaming, and error handling
+- Type-safe with Zod schemas
+- Cost tracking via OpenRouter dashboard
       "relevance": 95,
       "reasoning": "Why this clip matters"
     }
