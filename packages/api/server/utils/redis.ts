@@ -16,7 +16,8 @@ export function useRedis(): Redis | null {
 
   if (!redis) {
     redis = new Redis(config.REDIS_URL, {
-      maxRetriesPerRequest: 3,
+      // Set to null for BullMQ compatibility when using this connection for queuing
+      maxRetriesPerRequest: null,
       lazyConnect: true,
     });
 

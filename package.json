@@ -4,6 +4,7 @@
   "description": "Pixelhop starter monorepo (api, app, db, workers)",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:pipeline": "pnpm exec tsx scripts/test-pipeline.ts",
     "release:bump": "pnpm exec tsx scripts/bump-release-version.ts",
     "release:bump:force-retag": "pnpm exec tsx scripts/bump-release-version.ts --force-tag"
   },
