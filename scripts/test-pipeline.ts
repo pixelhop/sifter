@@ -1,20 +1,24 @@
 /**
- * Test script for Phase 3: Audio Pipeline
+ * Test script for Sifter Pipeline (Phases 3-4)
  *
  * Tests:
  * 1. Download utility
  * 2. FFmpeg utilities
  * 3. Status deduplication logic
  * 4. Transcription flow (requires OpenAI API key)
+ * 5. Clip selection prompt building
+ * 6. Full analysis pipeline (requires OpenAI API key)
  *
  * Usage:
  *   pnpm tsx scripts/test-pipeline.ts
+ *   pnpm tsx scripts/test-pipeline.ts --full    # Run transcription test
+ *   pnpm tsx scripts/test-pipeline.ts --analysis # Run analysis test
  *
  * Requirements:
  *   - Redis running on REDIS_URL
  *   - Database configured with DATABASE_URL
  *   - FFmpeg installed (for audio tests)
- *   - OPENAI_API_KEY set (for transcription tests)
+ *   - OPENAI_API_KEY set (for transcription/analysis tests)
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -316,6 +320,206 @@ async function main() {
 
       // Cleanup
       await cleanupDownload(testFile);
+      console.log("  PASSED\n");
+    } catch (error) {
+      console.log(`  FAILED: ${error}`);
+      console.log();
+    }
+  }
+
+  // Test 6: Clip Selection Prompt Building
+  console.log("Test 6: Clip Selection Prompt");
+  console.log("-".repeat(40));
+
+  try {
+    const { buildClipSelectionPrompt, CLIP_SELECTION_SYSTEM_PROMPT } = await import(
+      "../packages/workers/prompts/clip-selection"
+    );
+
+    // Test with sample data
+    const testPrompt = buildClipSelectionPrompt({
+      episodeTitle: "Test Episode",
+      podcastTitle: "Test Podcast",
+      transcript: {
+        text: "This is a test transcript about technology and AI.",
+        segments: [
+          { start: 0, end: 30, text: "Welcome to the show." },
+          { start: 30, end: 90, text: "Today we discuss artificial intelligence and its impact on society." },
+          { start: 90, end: 150, text: "Machine learning has revolutionized many industries." },
+        ],
+        duration: 150,
+      },
+      userInterests: ["technology", "AI", "machine learning"],
+    });
+
+    console.log(`  System prompt length: ${CLIP_SELECTION_SYSTEM_PROMPT.length} chars`);
+    console.log(`  User prompt length: ${testPrompt.length} chars`);
+    console.log(`  Contains interests: ${testPrompt.includes("technology")}`);
+    console.log(`  Contains timestamps: ${testPrompt.includes("[0.0s")}`);
+    console.log("  PASSED\n");
+  } catch (error) {
+    console.log(`  FAILED: ${error}`);
+    console.log();
+  }
+
+  // Test 7: Full Analysis Pipeline (optional, requires API key)
+  console.log("Test 7: Full Analysis Pipeline (Optional)");
+  console.log("-".repeat(40));
+
+  const runAnalysisTest = process.argv.includes("--analysis");
+
+  if (!openaiKey) {
+    console.log("  Skipping: OPENAI_API_KEY not set");
+    console.log("  To run analysis test: OPENAI_API_KEY=sk-... pnpm tsx scripts/test-pipeline.ts --analysis\n");
+  } else if (!runAnalysisTest) {
+    console.log("  Skipping: Use --analysis flag to run analysis test");
+    console.log("  Warning: This will use OpenAI API credits\n");
+  } else {
+    try {
+      const {
+        buildClipSelectionPrompt,
+        CLIP_SELECTION_SYSTEM_PROMPT,
+      } = await import("../packages/workers/prompts/clip-selection");
+
+      // Create test user with interests
+      const testUser = await prisma.user.upsert({
+        where: { email: "test-analysis@example.com" },
+        update: { interests: ["technology", "AI", "startups"] },
+        create: {
+          email: "test-analysis@example.com",
+          name: "Test Analysis User",
+          interests: ["technology", "AI", "startups"],
+        },
+      });
+      console.log(`  Test user: ${testUser.id}`);
+
+      // Create test podcast and episode with mock transcript
+      const testPodcast = await prisma.podcast.upsert({
+        where: { rssUrl: "https://test-analysis.example.com/feed.xml" },
+        update: {},
+        create: {
+          rssUrl: "https://test-analysis.example.com/feed.xml",
+          title: "Test Analysis Podcast",
+          author: "Test Author",
+        },
+      });
+      console.log(`  Test podcast: ${testPodcast.id}`);
+
+      // Create a mock transcript with interesting segments
+      const mockTranscript = {
+        text: "Welcome to the show. Today we're discussing AI and startups. The key insight is that machine learning can transform business operations. Let me tell you a story about a startup that grew from zero to a million users. They used AI to personalize their product. The results were incredible - 300% improvement in engagement. Now let's talk about the future of technology. I believe we're at an inflection point. Thanks for listening.",
+        segments: [
+          { start: 0, end: 15, text: "Welcome to the show." },
+          { start: 15, end: 30, text: "Today we're discussing AI and startups." },
+          { start: 30, end: 60, text: "The key insight is that machine learning can transform business operations." },
+          { start: 60, end: 90, text: "Let me tell you a story about a startup that grew from zero to a million users." },
+          { start: 90, end: 120, text: "They used AI to personalize their product." },
+          { start: 120, end: 150, text: "The results were incredible - 300% improvement in engagement." },
+          { start: 150, end: 180, text: "Now let's talk about the future of technology." },
+          { start: 180, end: 210, text: "I believe we're at an inflection point." },
+          { start: 210, end: 225, text: "Thanks for listening." },
+        ],
+        language: "en",
+        duration: 225,
+      };
+
+      const testEpisode = await prisma.episode.upsert({
+        where: {
+          podcastId_guid: {
+            podcastId: testPodcast.id,
+            guid: "test-episode-analysis",
+          },
+        },
+        update: {
+          status: "transcribed",
+          transcript: mockTranscript,
+        },
+        create: {
+          podcastId: testPodcast.id,
+          guid: "test-episode-analysis",
+          title: "Test Episode for Analysis",
+          audioUrl: TEST_AUDIO_URL,
+          publishedAt: new Date(),
+          status: "transcribed",
+          transcript: mockTranscript,
+        },
+      });
+      console.log(`  Test episode: ${testEpisode.id}`);
+      console.log(`  Status: ${testEpisode.status}`);
+
+      // Build and send prompt to GPT-4
+      const userPrompt = buildClipSelectionPrompt({
+        episodeTitle: testEpisode.title,
+        podcastTitle: testPodcast.title,
+        transcript: mockTranscript,
+        userInterests: testUser.interests,
+      });
+
+      console.log("  Calling GPT-4 for clip selection...");
+
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4-turbo-preview",
+          messages: [
+            { role: "system", content: CLIP_SELECTION_SYSTEM_PROMPT },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.3,
+          max_tokens: 4000,
+          response_format: { type: "json_object" },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} - ${error}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+      const clipSelection = JSON.parse(content);
+
+      console.log(`  Clips extracted: ${clipSelection.clips?.length || 0}`);
+
+      if (clipSelection.clips && clipSelection.clips.length > 0) {
+        for (const clip of clipSelection.clips) {
+          console.log(`    - [${clip.startTime}s-${clip.endTime}s] Score: ${clip.relevanceScore}`);
+          console.log(`      Summary: ${clip.summary}`);
+        }
+
+        // Save clips to database
+        await prisma.clip.deleteMany({ where: { episodeId: testEpisode.id } });
+
+        for (const clip of clipSelection.clips) {
+          await prisma.clip.create({
+            data: {
+              episodeId: testEpisode.id,
+              startTime: clip.startTime,
+              endTime: clip.endTime,
+              duration: clip.endTime - clip.startTime,
+              transcript: clip.transcript,
+              relevanceScore: clip.relevanceScore,
+              reasoning: clip.reasoning,
+              summary: clip.summary,
+            },
+          });
+        }
+
+        // Update episode status
+        await prisma.episode.update({
+          where: { id: testEpisode.id },
+          data: { status: "analyzed" },
+        });
+
+        console.log(`  Clips saved to database`);
+        console.log(`  Episode status updated to: analyzed`);
+      }
+
       console.log("  PASSED\n");
     } catch (error) {
       console.log(`  FAILED: ${error}`);

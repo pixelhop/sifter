@@ -70,3 +70,35 @@ export async function queueTranscriptionJob(
 
   return { jobId: job.id! };
 }
+
+export interface AnalysisJobData {
+  episodeId: string;
+  userId: string;
+  userInterests: string[];
+}
+
+/**
+ * Add an analysis job to the queue
+ * Returns null if Redis is not configured
+ */
+export async function queueAnalysisJob(
+  data: AnalysisJobData
+): Promise<{ jobId: string } | null> {
+  const queue = useQueue(QUEUE_NAMES.ANALYSIS);
+
+  if (!queue) {
+    return null;
+  }
+
+  const job = await queue.add("analyze", data, {
+    jobId: `analysis-${data.episodeId}-${data.userId}`,
+    // Prevent duplicate jobs for the same episode/user combination
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 5000,
+    },
+  });
+
+  return { jobId: job.id! };
+}
