@@ -14,6 +14,8 @@
   "packageManager": "pnpm@9.15.5+sha256.8472168c3e1fd0bff287e694b053fccbbf20579a3ff9526b6333beab8df65a8d",
   "dependencies": {
     "db": "workspace:*",
+    "ioredis": "^5.4.2",
+    "rss-parser": "^3.13.0",
     "zod": "^3.22.4"
   }
 }
