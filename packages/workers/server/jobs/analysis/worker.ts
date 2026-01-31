@@ -132,7 +132,7 @@ export default async function analysisWorker(
     });
 
     // ===== PHASE 2: GPT-4 ANALYSIS =====
-    logger.log("Calling GPT-4 for clip analysis");
+    logger.log("Calling GPT-5-mini for clip analysis");
 
     const transcript = episode.transcript as {
       text: string;
@@ -156,7 +156,7 @@ export default async function analysisWorker(
     const userPrompt = buildClipSelectionPrompt(promptInput);
 
     logger.log(`Transcript has ${transcript.segments.length} segments`);
-    logger.log(`Sending to GPT-4 for analysis...`);
+    logger.log(`Sending to GPT-5-mini for analysis...`);
 
     // Call OpenAI GPT-4 API
     const apiKey = process.env.OPENAI_API_KEY;
@@ -171,7 +171,7 @@ export default async function analysisWorker(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // Using gpt-4o-mini for cost efficiency, can be upgraded to gpt-4o
+        model: "gpt-5-mini", // Cost-efficient model for clip selection
         messages: [
           {
             role: "system",
