@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "presentation": {
+    "echo": false,
+    "reveal": "always",
+    "focus": false
+  },
+  "problemMatcher": [],
+  "options": {
+    "shell": {
+      // ensure shell uses .zshrc / nvm
+      "args": ["-il"]
+    }
+  },
+  "tasks": [
+    {
+      "label": "Run dev tasks",
+      "dependsOn": ["app-dev", "api-dev", "workers-dev"],
+      "type": "shell"
+    },
+    {
+      "label": "app-dev",
+      "type": "shell",
+      "command": "cd packages/app && pnpm dev",
+      "isBackground": true,
+      "hide": true
+    },
+    {
+      "label": "api-dev",
+      "type": "shell",
+      "command": "cd packages/api && pnpm dev",
+      "isBackground": true,
+      "hide": true
+    },
+    {
+      "label": "workers-dev",
+      "type": "shell",
+      "command": "cd packages/workers && pnpm dev",
+      "isBackground": true,
+      "hide": true
+    }
+  ]
+}

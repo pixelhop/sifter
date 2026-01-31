@@ -1,0 +1,21 @@
+@import "tailwindcss" source("../../..");
+
+:root {
+  font-size: 16px;
+}
+
+@layer base {
+  html,
+  body,
+  #__nuxt {
+    @apply min-h-screen bg-slate-950 text-slate-50;
+  }
+
+  body {
+    @apply antialiased;
+  }
+
+  a {
+    @apply text-sky-400 underline-offset-4 hover:underline;
+  }
+}

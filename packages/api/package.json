@@ -1,0 +1,19 @@
+{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "build": "nitro build",
+    "dev": "nitro dev --port 3010",
+    "preview": "node .output/server/index.mjs",
+    "postinstall": "nitro prepare"
+  },
+  "devDependencies": {
+    "h3": "^1.15.4",
+    "nitropack": "^2.12.4"
+  },
+  "packageManager": "pnpm@9.15.5+sha256.8472168c3e1fd0bff287e694b053fccbbf20579a3ff9526b6333beab8df65a8d",
+  "dependencies": {
+    "db": "workspace:*",
+    "zod": "^3.22.4"
+  }
+}

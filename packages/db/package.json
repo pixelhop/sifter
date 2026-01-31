@@ -1,0 +1,29 @@
+{
+  "name": "db",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "^6.18.0",
+    "esbuild": "0.17.18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.8",
+    "prisma": "^6.18.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.5.4"
+  },
+  "scripts": {
+    "build": "esbuild index.ts --bundle --outfile=index.cjs --platform=node",
+    "types": "./node_modules/.bin/tsc -p tsconfig.json --emitDeclarationOnly",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:create-only": "prisma migrate dev --create-only",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:push": "prisma db push --skip-generate",
+    "prisma:seed": "node --loader ts-node/esm prisma/seed.ts",
+    "postinstall": "prisma generate",
+    "nuke:dependencies": "rm -rf node_modules"
+  },
+  "main": "./index.ts",
+  "types": "./index.ts"
+}

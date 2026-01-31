@@ -1,0 +1,18 @@
+{
+  "name": "pixelhop-template",
+  "version": "0.1.0",
+  "description": "Pixelhop starter monorepo (api, app, db, workers)",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "release:bump": "pnpm exec tsx scripts/bump-release-version.ts",
+    "release:bump:force-retag": "pnpm exec tsx scripts/bump-release-version.ts --force-tag"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "semver": "^7.6.3",
+    "tsx": "^4.19.2"
+  },
+  "packageManager": "pnpm@9.15.5+sha256.8472168c3e1fd0bff287e694b053fccbbf20579a3ff9526b6333beab8df65a8d"
+}
