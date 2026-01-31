@@ -7,11 +7,185 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Users is a simple starting point so new projects can extend it however they like.
-model Users {
+// ============================================
+// User
+// ============================================
+model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Preferences
+  frequency     DigestFrequency @default(daily)
+  duration      Int             @default(20) // minutes: 10, 20, or 30
+  narratorVoice String          @default("adam")
+
+  // Interests/topics for clip relevance
+  interests String[] @default([])
+
+  // Public sharing
+  publicFeedEnabled Boolean @default(false)
+  publicFeedSlug    String? @unique // e.g., "username" for /u/username/feed
+
+  // Relations
+  subscriptions Subscription[]
+  digests       Digest[]
+}
+
+enum DigestFrequency {
+  daily
+  weekly
+}
+
+// ============================================
+// Podcast
+// ============================================
+model Podcast {
+  id            String   @id @default(uuid())
+  rssUrl        String   @unique
+  title         String
+  author        String?
+  description   String?
+  imageUrl      String?
+  lastCheckedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  episodes      Episode[]
+  subscriptions Subscription[]
+}
+
+// ============================================
+// Subscription (User <-> Podcast many-to-many)
+// ============================================
+model Subscription {
+  id        String   @id @default(uuid())
+  userId    String
+  podcastId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  podcast Podcast @relation(fields: [podcastId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, podcastId])
+}
+
+// ============================================
+// Episode
+// ============================================
+model Episode {
+  id          String        @id @default(uuid())
+  podcastId   String
+  guid        String // RSS guid for deduplication
+  title       String
+  description String?
+  audioUrl    String
+  duration    Int? // seconds
+  publishedAt DateTime
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Processing status
+  status EpisodeStatus @default(pending)
+
+  // Transcript (stored as JSON with timestamps)
+  transcript Json?
+
+  // Relations
+  podcast Podcast @relation(fields: [podcastId], references: [id], onDelete: Cascade)
+  clips   Clip[]
+
+  @@unique([podcastId, guid])
+}
+
+enum EpisodeStatus {
+  pending
+  downloading
+  transcribing
+  transcribed
+  analyzing
+  analyzed
+  failed
+}
+
+// ============================================
+// Clip
+// ============================================
+model Clip {
+  id        String   @id @default(uuid())
+  episodeId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Timing
+  startTime Float // seconds
+  endTime   Float // seconds
+  duration  Float // seconds
+
+  // Content
+  transcript String // Text of this clip segment
+
+  // AI analysis
+  relevanceScore Int     @default(0) // 0-100
+  reasoning      String? // Why this clip was selected
+  summary        String? // Brief summary of the clip
+
+  // Relations
+  episode     Episode      @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  digestClips DigestClip[]
+}
+
+// ============================================
+// Digest
+// ============================================
+model Digest {
+  id        String       @id @default(uuid())
+  userId    String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  status    DigestStatus @default(pending)
+
+  // Content
+  narratorScript String? // Script for AI narrator
+  audioUrl       String? // Final stitched audio URL
+  duration       Float? // Total duration in seconds
+
+  // Sharing
+  isPublic Boolean @default(false)
+  shareId  String? @unique // For public share URLs
+
+  // Relations
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  digestClips DigestClip[]
+}
+
+enum DigestStatus {
+  pending
+  generating_script
+  generating_audio
+  stitching
+  ready
+  failed
+}
+
+// ============================================
+// DigestClip (Digest <-> Clip many-to-many with ordering)
+// ============================================
+model DigestClip {
+  id        String   @id @default(uuid())
+  digestId  String
+  clipId    String
+  order     Int // Position in the digest
+  createdAt DateTime @default(now())
+
+  // Narrator intro for this clip (if any)
+  narratorIntro String?
+
+  digest Digest @relation(fields: [digestId], references: [id], onDelete: Cascade)
+  clip   Clip   @relation(fields: [clipId], references: [id], onDelete: Cascade)
+
+  @@unique([digestId, clipId])
 }

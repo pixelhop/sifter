@@ -53,8 +53,8 @@ export async function useWorker<T>(
   });
 
   worker.on("failed", (job, error) => {
-    console.error(`Worker ${name}: Job ${job.id} has failed. Error:`, error);
-    if (failureHandler) {
+    console.error(`Worker ${name}: Job ${job?.id} has failed. Error:`, error);
+    if (failureHandler && job) {
       failureHandler(job, error);
     }
   });
