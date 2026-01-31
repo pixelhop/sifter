@@ -1,56 +1,147 @@
-# Pixelhop Monorepo Template
+# Podcast Digest
 
-This repository is a clean starting point for new Pixelhop projects. It keeps a familiar structure—API, web app, database package, and workers service—without any product-specific logic or vendor lock-ins.
+AI-powered personalized podcast highlights. Listens to podcasts on your behalf, extracts relevant clips, and stitches them into a polished digest with an AI narrator.
 
-## Packages
+## What It Does
 
-| Package | Description |
-| --- | --- |
-| `packages/api` | Nitro server exposing `/api/health` plus a sample `/api/users` collection backed by Prisma. |
-| `packages/app` | Nuxt 4 application with a single landing page that pings the API. |
-| `packages/db` | Prisma client with a minimal `Users` model and helper for sharing the client across packages. |
-| `packages/workers` | Nitro-based BullMQ worker that seeds an `example-jobs` queue and exposes Bull Board. |
+1. **Subscribe** to your favorite podcasts
+2. **AI analyzes** new episodes and finds interesting segments
+3. **Auto-stitches** clips with an AI narrator into a digest
+4. **Listen** in your private podcast feed
+5. **Share** your curated digest publicly (optional)
 
-## Requirements
+## Architecture
 
-- Node.js 20+
-- `pnpm` 9+
-- PostgreSQL (or any Postgres-compatible service) for Prisma
-- Redis for BullMQ (run `packages/workers/docker-compose.yml` if you need a local instance)
+| Package | Purpose |
+|---------|---------|
+| `packages/api` | REST API — auth, podcast management, digest generation |
+| `packages/app` | Nuxt 4 web app — user dashboard, podcast search |
+| `packages/db` | Prisma schema — users, podcasts, episodes, clips, digests |
+| `packages/workers` | BullMQ workers — transcription, AI analysis, audio stitching |
+
+## Tech Stack
+
+- **Backend**: Nitro (Node.js)
+- **Frontend**: Nuxt 4 (Vue)
+- **Database**: PostgreSQL + Prisma
+- **Queue**: BullMQ + Redis
+- **Audio**: FFmpeg, OpenAI Whisper, ElevenLabs TTS
+- **AI**: OpenAI GPT-4 for clip selection
 
 ## Getting Started
 
 ```bash
 pnpm install
 
-# database helpers
+# Setup database
 cd packages/db
 pnpm run prisma:generate
+pnpm run prisma:migrate:dev
 
-# API server
-cd ../api
-pnpm dev
+# Start Redis for workers
+cd packages/workers
+docker-compose up -d
 
-# Nuxt app
-cd ../app
-pnpm dev
-
-# Workers (needs REDIS_URL)
-cd ../workers
+# Start all services
+cd ../..
 pnpm dev
 ```
 
-Environment variables:
+## Environment Variables
 
-- `DATABASE_URL` – used by Prisma/`packages/db`
-- `REDIS_URL` – used by `packages/workers`
-- `NITRO_PORT` or similar if you want to override default ports
+```bash
+# packages/api/.env
+DATABASE_URL="postgresql://user:pass@localhost:5432/podcast_digest"
+REDIS_URL="redis://localhost:6379"
+OPENAI_API_KEY="sk-..."
+ELEVENLABS_API_KEY="..."
 
-## Customising
+# packages/app/.env
+NUXT_PUBLIC_API_URL="http://localhost:3001"
+```
 
-- Extend `packages/db/prisma/schema.prisma` with your own models, then rerun `pnpm run prisma:generate`.
-- Replace the sample API routes with your domain logic while keeping the shared Prisma helper.
-- Drop in your preferred auth provider on the app/API sides (none ships with the template).
-- Add more queues or background jobs by following the `example-jobs` pattern in `packages/workers`.
+## Project Structure
 
-Keep this README updated as you add new conventions so future teams understand how to build on top of the template.*** End Patch
+```
+podcast-digest/
+├── packages/
+│   ├── api/           # Nitro API server
+│   │   ├── routes/
+│   │   │   ├── auth/       # Login/register
+│   │   │   ├── podcasts/   # Subscribe, search
+│   │   │   ├── digests/    # Generate, list
+│   │   │   └── clips/      # Clip details
+│   │   └── utils/
+│   │       ├── audio.ts    # FFmpeg helpers
+│   │       ├── whisper.ts  # Transcription
+│   │       └── elevenlabs.ts # TTS
+│   │
+│   ├── app/           # Nuxt 4 frontend
+│   │   ├── pages/
+│   │   │   ├── index.vue      # Landing
+│   │   │   ├── dashboard.vue  # My digests
+│   │   │   ├── podcasts.vue   # Search & subscribe
+│   │   │   └── digest/[id].vue # Listen to digest
+│   │   └── components/
+│   │       ├── AudioPlayer.vue
+│   │       ├── PodcastSearch.vue
+│   │       └── DigestCard.vue
+│   │
+│   ├── db/            # Prisma database
+│   │   ├── prisma/
+│   │   │   └── schema.prisma  # Models
+│   │   └── src/
+│   │       └── index.ts       # Database client
+│   │
+│   └── workers/       # BullMQ background jobs
+│       ├── jobs/
+│       │   ├── transcribe.ts      # Whisper transcription
+│       │   ├── analyze.ts         # GPT-4 clip selection
+│       │   └── stitch.ts          # FFmpeg audio mixing
+│       └── queues/
+│           └── index.ts
+│
+└── specs/
+    └── mvp-spec.md    # Full MVP specification
+```
+
+## Key Features (MVP)
+
+- [ ] User auth & profile setup
+- [ ] Podcast search via iTunes API
+- [ ] RSS feed subscription (5-10 podcasts)
+- [ ] Daily/weekly digest generation
+- [ ] AI clip selection with GPT-4
+- [ ] AI narrator with ElevenLabs
+- [ ] Audio stitching with FFmpeg
+- [ ] Private podcast feed
+- [ ] Public digest sharing
+
+## Development
+
+```bash
+# Run everything
+pnpm dev
+
+# Run specific package
+pnpm --filter api dev
+pnpm --filter app dev
+pnpm --filter workers dev
+
+# Database commands
+cd packages/db
+pnpm run prisma:studio    # Open Prisma Studio
+pnpm run prisma:migrate:dev  # Create migration
+```
+
+## Deployment
+
+- API: Render/Railway
+- App: Vercel/Netlify
+- Database: Supabase/Neon
+- Redis: Upstash
+- Storage: S3 + CloudFront
+
+## License
+
+MIT
