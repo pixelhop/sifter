@@ -2,7 +2,7 @@
 # Services: api, workers (Redis and Postgres added via Railway dashboard)
 
 [build]
-builder = "nixpacks"
+builder = "railpack"
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

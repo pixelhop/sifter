@@ -2,7 +2,7 @@
 # Root directory should be set to repo root in Railway dashboard
 
 [build]
-builder = "nixpacks"
+builder = "railpack"
 buildCommand = "pnpm install --filter=workers... && pnpm --filter=db prisma generate && pnpm --filter=workers build"
 
 [deploy]
