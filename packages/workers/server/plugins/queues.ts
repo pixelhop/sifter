@@ -7,6 +7,7 @@ import transcriptionWorker from "../jobs/transcription/worker";
 import analysisWorker from "../jobs/analysis/worker";
 import curationWorker from "../jobs/curation/worker";
 import digestWorker from "../jobs/digest/worker";
+import orchestratorWorker from "../jobs/orchestrator/worker";
 
 // Queue names
 export const QUEUE_NAMES = {
@@ -15,6 +16,7 @@ export const QUEUE_NAMES = {
   CURATION: "curation",
   STITCHING: "stitching",
   DIGEST: "digest",
+  ORCHESTRATOR: "orchestrator",
 } as const;
 
 export default defineNitroPlugin(async (nitroApp) => {
@@ -42,12 +44,18 @@ export default defineNitroPlugin(async (nitroApp) => {
   await useWorker(QUEUE_NAMES.DIGEST, digestWorker);
   console.log(`Queue "${QUEUE_NAMES.DIGEST}" initialized`);
 
+  // Set up orchestrator queue
+  const orchestratorQueue = await useQueue(QUEUE_NAMES.ORCHESTRATOR);
+  await useWorker(QUEUE_NAMES.ORCHESTRATOR, orchestratorWorker);
+  console.log(`Queue "${QUEUE_NAMES.ORCHESTRATOR}" initialized`);
+
   // Create the Bull Board monitor UI with all queues
   const bullQueues: Queue[] = [
     transcriptionQueue,
     analysisQueue,
     curationQueue,
     digestQueue,
+    orchestratorQueue,
   ];
 
   createBullBoard({
