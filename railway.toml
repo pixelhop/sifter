@@ -1,6 +1,3 @@
-# Railway configuration for Sifter monorepo
-# Services: api, workers (Redis and Postgres added via Railway dashboard)
-
 [build]
 builder = "railpack"
 
