@@ -40,6 +40,7 @@ export const QUEUE_NAMES = {
   CURATION: "curation",
   STITCHING: "stitching",
   DIGEST: "digest",
+  ORCHESTRATOR: "orchestrator",
 } as const;
 
 export interface TranscriptionJobData {
@@ -134,6 +135,33 @@ export async function queueCurationJob(
       type: "exponential",
       delay: 5000,
     },
+  });
+
+  return { jobId: job.id! };
+}
+
+export interface OrchestratorJobData {
+  userId: string;
+  frequency: "daily" | "weekly";
+}
+
+/**
+ * Add an orchestrator job to the queue
+ * Returns null if Redis is not configured
+ */
+export async function queueOrchestratorJob(
+  data: OrchestratorJobData
+): Promise<{ jobId: string } | null> {
+  const queue = useQueue(QUEUE_NAMES.ORCHESTRATOR);
+
+  if (!queue) {
+    return null;
+  }
+
+  const jobId = `orchestrator-${data.userId}-${Date.now()}`;
+  const job = await queue.add("orchestrate", data, {
+    jobId,
+    attempts: 1,
   });
 
   return { jobId: job.id! };
