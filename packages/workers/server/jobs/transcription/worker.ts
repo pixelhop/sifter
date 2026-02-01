@@ -8,6 +8,16 @@ import {
   cleanupDownload,
 } from "../../../utils/download";
 import { useWhisperProvider } from "../../../providers/whisper";
+import {
+  WHISPER_MAX_FILE_SIZE,
+  needsChunking,
+  prepareAudioForWhisper,
+  cleanupChunks,
+  mergeTranscriptChunks,
+  getTempChunkDir,
+  type AudioChunk,
+  type TranscriptChunk,
+} from "../../../utils/ffmpeg";
 
 export interface TranscriptionJobData {
   episodeId: string;
@@ -31,6 +41,7 @@ export interface TranscriptionJobResult {
 /**
  * Transcription worker
  * Downloads episode audio and transcribes it using Whisper API
+ * Supports chunking for files >25MB (Whisper API limit)
  *
  * Flow: pending → downloading → transcribing → transcribed
  */
@@ -77,6 +88,7 @@ export default async function transcriptionWorker(
   }
 
   let tempFilePath: string | null = null;
+  let chunks: AudioChunk[] = [];
 
   try {
     // ===== PHASE 1: DOWNLOADING =====
@@ -102,6 +114,14 @@ export default async function transcriptionWorker(
       `Download complete. Size: ${(downloadResult.size / 1024 / 1024).toFixed(2)} MB`
     );
 
+    // Check if chunking is needed
+    const requiresChunking = await needsChunking(tempFilePath);
+    if (requiresChunking) {
+      logger.log(
+        `File size ${(downloadResult.size / 1024 / 1024).toFixed(2)} MB exceeds Whisper limit of ${WHISPER_MAX_FILE_SIZE / 1024 / 1024} MB, preparing chunks...`
+      );
+    }
+
     // ===== PHASE 2: TRANSCRIBING =====
     logger.log(`Updating status to 'transcribing'`);
     await prisma.episode.update({
@@ -109,26 +129,90 @@ export default async function transcriptionWorker(
       data: { status: "transcribing" },
     });
 
-    logger.log(`Starting Whisper transcription`);
     const whisper = useWhisperProvider();
     logger.log(`Using Whisper provider: ${whisper.name}`);
 
-    const transcriptionResult = await whisper.transcribe(tempFilePath);
+    let transcript: TranscriptionJobResult["transcript"];
 
-    logger.log(
-      `Transcription complete. Segments: ${transcriptionResult.segments.length}`
-    );
-    logger.log(`Detected language: ${transcriptionResult.language}`);
-    logger.log(`Duration: ${transcriptionResult.duration}s`);
+    if (requiresChunking) {
+      // ===== CHUNKED TRANSCRIPTION =====
+      logger.log(`Starting chunked transcription`);
+
+      const chunkDir = getTempChunkDir(episodeId);
+      chunks = await prepareAudioForWhisper(tempFilePath, chunkDir);
+
+      logger.log(`Audio split into ${chunks.length} chunks`);
+
+      // Transcribe each chunk
+      const chunkResults: Array<{
+        chunk: AudioChunk;
+        transcript: TranscriptChunk;
+      }> = [];
+      let detectedLanguage = "en";
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        logger.log(
+          `Transcribing chunk ${i + 1}/${chunks.length} (offset: ${chunk.startTime}s, duration: ${chunk.duration}s)`
+        );
+
+        const result = await whisper.transcribe(chunk.path);
+
+        chunkResults.push({
+          chunk,
+          transcript: {
+            text: result.text,
+            segments: result.segments,
+            language: result.language,
+            duration: result.duration,
+          },
+        });
+
+        // Use language from first chunk
+        if (i === 0 && result.language) {
+          detectedLanguage = result.language;
+        }
+
+        // Update progress
+        const progress = Math.round(((i + 1) / chunks.length) * 100);
+        await job.updateProgress(progress);
+      }
+
+      // Merge transcripts with adjusted timestamps
+      logger.log(`Merging ${chunkResults.length} chunk transcripts`);
+      const merged = mergeTranscriptChunks(chunkResults, detectedLanguage);
+
+      transcript = {
+        text: merged.text,
+        segments: merged.segments,
+        language: merged.language,
+        duration: merged.duration,
+      };
+
+      logger.log(
+        `Merged transcript has ${transcript.segments.length} segments, duration: ${transcript.duration}s`
+      );
+    } else {
+      // ===== SINGLE FILE TRANSCRIPTION =====
+      logger.log(`Starting Whisper transcription (single file)`);
+      const result = await whisper.transcribe(tempFilePath);
+
+      transcript = {
+        text: result.text,
+        segments: result.segments,
+        language: result.language,
+        duration: result.duration,
+      };
+
+      logger.log(
+        `Transcription complete. Segments: ${transcript.segments.length}`
+      );
+    }
+
+    logger.log(`Detected language: ${transcript.language}`);
+    logger.log(`Duration: ${transcript.duration}s`);
 
     // ===== PHASE 3: SAVE TRANSCRIPT =====
-    const transcript = {
-      text: transcriptionResult.text,
-      segments: transcriptionResult.segments,
-      language: transcriptionResult.language,
-      duration: transcriptionResult.duration,
-    };
-
     logger.log(`Saving transcript to database`);
     await prisma.episode.update({
       where: { id: episodeId },
@@ -136,8 +220,8 @@ export default async function transcriptionWorker(
         status: "transcribed",
         // Cast to any for Prisma JSON field compatibility
         transcript: transcript as any,
-        duration: transcriptionResult.duration
-          ? Math.round(transcriptionResult.duration)
+        duration: transcript.duration
+          ? Math.round(transcript.duration)
           : undefined,
       },
     });
@@ -158,10 +242,16 @@ export default async function transcriptionWorker(
 
     throw error;
   } finally {
-    // Cleanup temp file
+    // Cleanup temp files
     if (tempFilePath) {
       logger.log(`Cleaning up temp file: ${tempFilePath}`);
       await cleanupDownload(tempFilePath);
+    }
+
+    // Cleanup chunks if any were created
+    if (chunks.length > 0) {
+      logger.log(`Cleaning up ${chunks.length} chunk files`);
+      await cleanupChunks(chunks);
     }
   }
 }

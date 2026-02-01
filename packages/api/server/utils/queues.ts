@@ -37,7 +37,9 @@ export function useQueue(name: string): Queue | null {
 export const QUEUE_NAMES = {
   TRANSCRIPTION: "transcription",
   ANALYSIS: "analysis",
+  CURATION: "curation",
   STITCHING: "stitching",
+  DIGEST: "digest",
 } as const;
 
 export interface TranscriptionJobData {
@@ -93,6 +95,40 @@ export async function queueAnalysisJob(
   const job = await queue.add("analyze", data, {
     jobId: `analysis-${data.episodeId}-${data.userId}`,
     // Prevent duplicate jobs for the same episode/user combination
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 5000,
+    },
+  });
+
+  return { jobId: job.id! };
+}
+
+export interface CurationJobData {
+  digestId: string;
+  userId: string;
+  episodeIds: string[];
+  userInterests: string[];
+  targetDuration?: number;
+  targetClipCount?: { min: number; max: number };
+}
+
+/**
+ * Add a curation job to the queue
+ * Returns null if Redis is not configured
+ */
+export async function queueCurationJob(
+  data: CurationJobData
+): Promise<{ jobId: string } | null> {
+  const queue = useQueue(QUEUE_NAMES.CURATION);
+
+  if (!queue) {
+    return null;
+  }
+
+  const job = await queue.add("curate", data, {
+    jobId: `curation-${data.digestId}`,
     attempts: 3,
     backoff: {
       type: "exponential",
