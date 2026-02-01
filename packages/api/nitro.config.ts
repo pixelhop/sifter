@@ -1,4 +1,8 @@
 import { defineNitroConfig } from "nitropack/config";
+import { config } from "dotenv";
+
+// Load environment variables
+config();
 
 // https://nitro.build/config
 export default defineNitroConfig({
@@ -9,7 +13,7 @@ export default defineNitroConfig({
   },
   runtimeConfig: {
     logLevel: "info",
-    redisUrl: "",
+    redisUrl: process.env.REDIS_URL || "",
     public: {
       apiBase: "/api",
     },

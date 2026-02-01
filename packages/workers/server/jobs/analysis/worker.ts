@@ -7,6 +7,7 @@ import {
   type ClipSelectionInput,
   type ClipSelectionOutput,
 } from "../../../prompts/clip-selection";
+import { useLLMClient } from "../../../providers/llm";
 
 export interface AnalysisJobData {
   episodeId: string;
@@ -26,26 +27,6 @@ export interface AnalysisJobResult {
     reasoning: string;
     summary: string;
   }>;
-}
-
-interface OpenAIResponse {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    message: {
-      role: string;
-      content: string;
-    };
-    finish_reason: string;
-  }>;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
 }
 
 /**
@@ -131,8 +112,10 @@ export default async function analysisWorker(
       data: { status: "analyzing" },
     });
 
-    // ===== PHASE 2: GPT-4 ANALYSIS =====
-    logger.log("Calling GPT-5-mini for clip analysis");
+    // ===== PHASE 2: LLM ANALYSIS =====
+    const llm = useLLMClient();
+    const model = llm.getDefaultModel();
+    logger.log(`Calling ${model} for clip analysis (provider: ${llm.getProvider()})`);
 
     const transcript = episode.transcript as {
       text: string;
@@ -156,50 +139,26 @@ export default async function analysisWorker(
     const userPrompt = buildClipSelectionPrompt(promptInput);
 
     logger.log(`Transcript has ${transcript.segments.length} segments`);
-    logger.log(`Sending to GPT-5-mini for analysis...`);
+    logger.log(`Sending to ${model} for analysis...`);
 
-    // Call OpenAI GPT-4 API
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error("OPENAI_API_KEY not configured");
-    }
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-5-mini", // Cost-efficient model for clip selection
-        messages: [
-          {
-            role: "system",
-            content: CLIP_SELECTION_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: userPrompt,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 4000,
-      }),
+    // Call LLM API (OpenRouter or OpenAI)
+    const result = await llm.complete({
+      messages: [
+        {
+          role: "system",
+          content: CLIP_SELECTION_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+      temperature: 1,
+      maxTokens: 4000,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
-    }
-
-    const data: OpenAIResponse = await response.json();
-    const content = data.choices[0]?.message?.content;
-
-    if (!content) {
-      throw new Error("No content in OpenAI response");
-    }
-
-    logger.log(`GPT-4 response received. Tokens used: ${data.usage.total_tokens}`);
+    const content = result.content;
+    logger.log(`LLM response received (${result.provider}). Tokens used: ${result.usage.totalTokens}`);
 
     // Parse the JSON response
     let analysisResult: ClipSelectionOutput;
@@ -212,15 +171,15 @@ export default async function analysisWorker(
       }
       analysisResult = JSON.parse(jsonContent) as ClipSelectionOutput;
     } catch (parseError) {
-      logger.error(`Failed to parse GPT-4 response: ${content}`);
-      throw new Error(`Failed to parse GPT-4 response: ${parseError}`);
+      logger.error(`Failed to parse LLM response: ${content}`);
+      throw new Error(`Failed to parse LLM response: ${parseError}`);
     }
 
     if (!analysisResult.clips || !Array.isArray(analysisResult.clips)) {
       throw new Error("Invalid response format: clips array not found");
     }
 
-    logger.log(`GPT-4 identified ${analysisResult.clips.length} clips`);
+    logger.log(`LLM identified ${analysisResult.clips.length} clips`);
 
     // ===== PHASE 3: SAVE CLIPS =====
     logger.log("Saving clips to database");

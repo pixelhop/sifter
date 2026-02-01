@@ -20,8 +20,8 @@ export default defineEventHandler(async (event) => {
 
     // send headers
     if (authRes.headers) {
-      for (const header in authRes.headers) {
-        setHeader(event, header, authRes.headers[header]);
+      for (const [header, value] of Object.entries(authRes.headers)) {
+        setHeader(event, header, value);
       }
     }
 

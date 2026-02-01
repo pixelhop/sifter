@@ -1,11 +1,19 @@
 /**
  * FFmpeg Utilities
- * Audio processing functions for clip manipulation
+ * Audio processing functions for clip manipulation and chunking
  */
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+// Whisper API limit: 25MB
+export const WHISPER_MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB in bytes
+// Target chunk size to stay safely under limit (with some buffer)
+export const TARGET_CHUNK_SIZE = 22 * 1024 * 1024; // 22MB
+// Default chunk duration for splitting (at 128kbps, ~20 min = ~19MB)
+export const DEFAULT_CHUNK_DURATION_MINUTES = 20;
+export const DEFAULT_CHUNK_DURATION_SECONDS = DEFAULT_CHUNK_DURATION_MINUTES * 60;
 
 export interface ClipOptions {
   startTime: number; // Start time in seconds
@@ -164,10 +172,10 @@ export async function sliceClip(
 
   const args = [
     "-y", // Overwrite output
+    "-ss",
+    startTime.toString(), // Seek BEFORE -i for fast seeking
     "-i",
     inputPath,
-    "-ss",
-    startTime.toString(),
     "-t",
     duration.toString(),
   ];
@@ -361,4 +369,315 @@ export async function checkFFmpegAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ============================================
+// TEMP DIRECTORY HELPERS
+// ============================================
+
+const SIFTER_TEMP_DIR = "/tmp/sifter/episodes";
+
+/**
+ * Get the temp directory for chunks
+ */
+export function getTempChunkDir(episodeId: string): string {
+  return path.join(SIFTER_TEMP_DIR, `${episodeId}_chunks`);
+}
+
+// ============================================
+// AUDIO CHUNKING FOR WHISPER API
+// ============================================
+
+export interface AudioChunk {
+  index: number;
+  path: string;
+  startTime: number; // Start time in original audio (seconds)
+  endTime: number; // End time in original audio (seconds)
+  duration: number; // Duration of this chunk (seconds)
+}
+
+export interface ChunkingOptions {
+  maxChunkSizeBytes?: number;
+  targetChunkDurationSeconds?: number;
+  compressTo64kbps?: boolean; // Fallback to 64kbps compression
+  overlapSeconds?: number; // Overlap between chunks to avoid cutting words
+}
+
+/**
+ * Get file size in bytes
+ */
+export async function getFileSize(inputPath: string): Promise<number> {
+  const stats = await fs.promises.stat(inputPath);
+  return stats.size;
+}
+
+/**
+ * Check if audio file needs chunking for Whisper API (25MB limit)
+ */
+export async function needsChunking(inputPath: string): Promise<boolean> {
+  const size = await getFileSize(inputPath);
+  return size > WHISPER_MAX_FILE_SIZE;
+}
+
+/**
+ * Compress audio to lower bitrate to fit within size limit
+ * 64kbps MP3 allows ~52 minutes per 25MB
+ */
+export async function compressAudio(
+  inputPath: string,
+  outputPath: string,
+  bitrate: "64k" | "96k" | "128k" = "64k"
+): Promise<void> {
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+
+  await runFFmpeg([
+    "-y",
+    "-i",
+    inputPath,
+    "-acodec",
+    "libmp3lame",
+    "-b:a",
+    bitrate,
+    "-ar",
+    "44100",
+    "-ac",
+    "2",
+    outputPath,
+  ]);
+}
+
+/**
+ * Try to compress audio to fit within 25MB limit
+ * Returns true if compression succeeded, false if file is still too large
+ */
+export async function tryCompressForWhisper(
+  inputPath: string,
+  outputPath: string
+): Promise<{ success: boolean; path: string; size: number }> {
+  // First try 64kbps compression
+  await compressAudio(inputPath, outputPath, "64k");
+  const size = await getFileSize(outputPath);
+
+  if (size <= WHISPER_MAX_FILE_SIZE) {
+    return { success: true, path: outputPath, size };
+  }
+
+  // If still too large, compression alone won't work
+  return { success: false, path: outputPath, size };
+}
+
+/**
+ * Split audio into chunks based on duration
+ * Each chunk will have timestamps relative to the original audio
+ */
+export async function splitAudioIntoChunks(
+  inputPath: string,
+  outputDir: string,
+  options: ChunkingOptions = {}
+): Promise<AudioChunk[]> {
+  const {
+    targetChunkDurationSeconds = DEFAULT_CHUNK_DURATION_SECONDS,
+    overlapSeconds = 2, // 2 second overlap to avoid cutting words
+  } = options;
+
+  // Get audio info
+  const info = await getAudioInfo(inputPath);
+  const totalDuration = info.duration;
+
+  // Ensure output directory exists
+  await fs.promises.mkdir(outputDir, { recursive: true });
+
+  const chunks: AudioChunk[] = [];
+  const baseName = path.basename(inputPath, path.extname(inputPath));
+
+  let currentTime = 0;
+  let chunkIndex = 0;
+
+  while (currentTime < totalDuration) {
+    // Calculate chunk boundaries
+    const chunkStart = Math.max(0, currentTime - overlapSeconds);
+    const chunkEnd = Math.min(
+      totalDuration,
+      currentTime + targetChunkDurationSeconds + overlapSeconds
+    );
+    const chunkDuration = chunkEnd - chunkStart;
+
+    // Generate output path
+    const outputPath = path.join(
+      outputDir,
+      `${baseName}_chunk_${chunkIndex.toString().padStart(3, "0")}.mp3`
+    );
+
+    // Extract chunk (seek BEFORE -i for fast seeking with correct audio)
+    await runFFmpeg([
+      "-y",
+      "-ss",
+      chunkStart.toString(),
+      "-i",
+      inputPath,
+      "-t",
+      chunkDuration.toString(),
+      "-acodec",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      "-ar",
+      "44100",
+      "-ac",
+      "2",
+      outputPath,
+    ]);
+
+    chunks.push({
+      index: chunkIndex,
+      path: outputPath,
+      startTime: chunkStart,
+      endTime: chunkEnd,
+      duration: chunkDuration,
+    });
+
+    // Move to next chunk (accounting for overlap)
+    currentTime += targetChunkDurationSeconds;
+    chunkIndex++;
+
+    // Break if we've reached the end
+    if (currentTime >= totalDuration) {
+      break;
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Smart audio chunking strategy:
+ * 1. First, try compressing to 64kbps (allows ~52 min per 25MB)
+ * 2. If still too large, split into time-based chunks
+ *
+ * Returns array of chunks that can be transcribed individually
+ */
+export async function prepareAudioForWhisper(
+  inputPath: string,
+  outputDir: string,
+  options: ChunkingOptions = {}
+): Promise<AudioChunk[]> {
+  const fileSize = await getFileSize(inputPath);
+
+  // If file is already under limit, return as single chunk
+  if (fileSize <= WHISPER_MAX_FILE_SIZE) {
+    const info = await getAudioInfo(inputPath);
+    return [
+      {
+        index: 0,
+        path: inputPath,
+        startTime: 0,
+        endTime: info.duration,
+        duration: info.duration,
+      },
+    ];
+  }
+
+  // Try compression first
+  const compressedPath = path.join(outputDir, "compressed.mp3");
+  const compressResult = await tryCompressForWhisper(inputPath, compressedPath);
+
+  if (compressResult.success) {
+    const info = await getAudioInfo(compressedPath);
+    return [
+      {
+        index: 0,
+        path: compressedPath,
+        startTime: 0,
+        endTime: info.duration,
+        duration: info.duration,
+      },
+    ];
+  }
+
+  // Compression alone not enough, need to split
+  // Clean up failed compression attempt
+  await fs.promises.unlink(compressedPath).catch(() => {});
+
+  // Use compression + chunking for maximum space efficiency
+  const chunks = await splitAudioIntoChunks(compressedPath, outputDir, {
+    ...options,
+    targetChunkDurationSeconds: 25 * 60, // 25 min chunks at 64kbps = ~12MB each
+  });
+
+  return chunks;
+}
+
+/**
+ * Clean up chunk files after transcription
+ */
+export async function cleanupChunks(chunks: AudioChunk[]): Promise<void> {
+  for (const chunk of chunks) {
+    try {
+      await fs.promises.unlink(chunk.path);
+    } catch {
+      // Ignore errors during cleanup
+    }
+  }
+}
+
+/**
+ * Merge multiple transcript chunks, adjusting timestamps
+ * Each chunk's segments should have their timestamps offset by the chunk's startTime
+ */
+export interface TranscriptChunk {
+  text: string;
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
+  language?: string;
+  duration?: number;
+}
+
+export interface MergedTranscript {
+  text: string;
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
+  language: string;
+  duration: number;
+}
+
+export function mergeTranscriptChunks(
+  chunks: Array<{ chunk: AudioChunk; transcript: TranscriptChunk }>,
+  detectedLanguage: string
+): MergedTranscript {
+  const allSegments: Array<{ start: number; end: number; text: string }> = [];
+  const textParts: string[] = [];
+  let totalDuration = 0;
+
+  for (const { chunk, transcript } of chunks) {
+    // Adjust segment timestamps by chunk's offset
+    const adjustedSegments = transcript.segments.map((seg) => ({
+      start: seg.start + chunk.startTime,
+      end: seg.end + chunk.startTime,
+      text: seg.text,
+    }));
+
+    allSegments.push(...adjustedSegments);
+    textParts.push(transcript.text);
+
+    // Track the furthest end time
+    const chunkEndTime =
+      chunk.startTime + (transcript.duration || chunk.duration);
+    totalDuration = Math.max(totalDuration, chunkEndTime);
+  }
+
+  // Sort segments by start time
+  allSegments.sort((a, b) => a.start - b.start);
+
+  return {
+    text: textParts.join(" ").trim(),
+    segments: allSegments,
+    language: detectedLanguage,
+    duration: totalDuration,
+  };
 }

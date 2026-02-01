@@ -136,6 +136,10 @@ model Clip {
   // Relations
   episode     Episode      @relation(fields: [episodeId], references: [id], onDelete: Cascade)
   digestClips DigestClip[]
+
+  // Optional: Link to a specific digest (useful for tracking)
+  digestId String?
+  digest   Digest? @relation(fields: [digestId], references: [id], onDelete: SetNull)
 }
 
 // ============================================
@@ -157,13 +161,19 @@ model Digest {
   isPublic Boolean @default(false)
   shareId  String? @unique // For public share URLs
 
+  // Source tracking
+  podcastId  String? // Primary podcast (if from single podcast)
+  episodeIds String[] // Episode IDs included in this digest
+
   // Relations
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   digestClips DigestClip[]
+  clips       Clip[] // Direct relation for easy clip access
 }
 
 enum DigestStatus {
   pending
+  curating
   generating_script
   generating_audio
   stitching
